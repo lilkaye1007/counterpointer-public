@@ -1,0 +1,57 @@
+#!/bin/zsh
+set -euo pipefail
+
+repo_root="${0:A:h:h}"
+target="${HOME}/.local/bin/cpt"
+dry_run=0
+rollback=0
+while (( $# )); do
+  case "$1" in
+    --target) target="$2"; shift 2;;
+    --dry-run) dry_run=1; shift;;
+    --rollback) rollback=1; shift;;
+    --help|-h) print '使い方: bin/install [--target <path>] [--dry-run|--rollback]'; exit 0;;
+    *) target="$1"; shift;;
+  esac
+done
+
+[[ "$target" == /* && "${target:t}" == cpt ]] || { print -u2 'install先は絶対pathかつ末尾cptで指定してください'; exit 2; }
+zsh -n "$repo_root/bin/cpt"
+"$repo_root/bin/cpt" version --json >/dev/null
+
+if (( rollback )); then
+  backups=("$target".backup.*(N.om))
+  (( ${#backups[@]} > 0 )) || { print -u2 'rollback可能な旧installがありません'; exit 2; }
+  previous="${backups[1]}"
+  if (( dry_run )); then print "rollback確認: $previous → $target"; exit 0; fi
+  [[ ! -e "$target" && ! -L "$target" ]] || /bin/mv "$target" "$target.failed.$(/bin/date -u +%Y%m%dT%H%M%SZ)"
+  /bin/mv "$previous" "$target"
+  print "rollback完了: $target"
+  exit 0
+fi
+
+if (( dry_run )); then
+  print "install確認: $target → $repo_root/bin/cpt"
+  exit 0
+fi
+
+mkdir -p "${target:h}"
+backup=""
+if [[ -e "$target" || -L "$target" ]]; then
+  backup="$target.backup.$(/bin/date -u +%Y%m%dT%H%M%SZ)"
+  /bin/mv "$target" "$backup"
+fi
+temporary="$target.new.$$"
+trap '/bin/rm -f "$temporary"' EXIT INT TERM
+/bin/cp "$repo_root/bin/cpt" "$temporary"
+chmod 755 "$temporary"
+/bin/mv "$temporary" "$target"
+
+install_state="${CPT_INSTALL_STATE_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/counterpointer-install}"
+mkdir -p "$install_state"; chmod 700 "$install_state"
+manifest_tmp="$install_state/manifest.json.new.$$"
+jq -n --arg version "0.3.0" --arg target "$target" --arg source "$repo_root/bin/cpt" --arg backup "$backup" --arg installed_at "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" '{schema_version:1,version:$version,target:$target,source:$source,backup:$backup,installed_at:$installed_at}' > "$manifest_tmp"
+chmod 600 "$manifest_tmp"; /bin/mv "$manifest_tmp" "$install_state/manifest.json"
+trap - EXIT INT TERM
+print "install完了: $target → $repo_root/bin/cpt"
+[[ -z "$backup" ]] || print "旧install退避: $backup"

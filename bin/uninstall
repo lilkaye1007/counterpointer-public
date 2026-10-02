@@ -1,0 +1,22 @@
+#!/bin/zsh
+set -euo pipefail
+
+target="${HOME}/.local/bin/cpt"
+dry_run=0
+while (( $# )); do
+  case "$1" in
+    --target) target="$2"; shift 2;;
+    --dry-run) dry_run=1; shift;;
+    --help|-h) print '使い方: bin/uninstall [--target <path>] [--dry-run]'; exit 0;;
+    *) print -u2 "不明なoptionです: $1"; exit 2;;
+  esac
+done
+
+[[ "$target" == /* && "${target:t}" == cpt ]] || { print -u2 '対象は絶対pathかつ末尾cptで指定してください'; exit 2; }
+[[ -L "$target" || -f "$target" ]] || { print 'Counterpointer CLIはinstallされていません'; exit 0; }
+removed="$target.removed.$(/bin/date -u +%Y%m%dT%H%M%SZ)"
+if (( dry_run )); then print "uninstall確認: $target → $removed"; exit 0; fi
+/bin/mv "$target" "$removed"
+print "uninstall完了: $target"
+print "復元可能な退避先: $removed"
+print '各projectの.counterpointer状態は削除していません'
